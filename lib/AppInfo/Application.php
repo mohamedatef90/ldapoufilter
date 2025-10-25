@@ -10,7 +10,6 @@ use OCP\AppFramework\Bootstrap\IRegistrationContext;
 use OCA\LdapOuFilter\Listener\UserSearchListener;
 use OCA\LdapOuFilter\Service\LdapOuService;
 use OCP\Collaboration\Collaborators\SearchResultEvent;
-use OCP\IServerContainer;
 use OCP\EventDispatcher\IEventDispatcher;
 
 class Application extends App implements IBootstrap {
@@ -22,7 +21,8 @@ class Application extends App implements IBootstrap {
     
     public function register(IRegistrationContext $context): void {
         // Register services properly for Nextcloud 31
-        $context->registerService(LdapOuService::class, function(IServerContainer $c) {
+        // Note: No type hint on $c - Nextcloud passes DIContainer, not IServerContainer
+        $context->registerService(LdapOuService::class, function($c) {
             return new LdapOuService(
                 $c->get(\OCP\IUserManager::class),
                 $c->get(\OCP\IConfig::class),
@@ -31,7 +31,7 @@ class Application extends App implements IBootstrap {
         });
         
         // Register UserSearchListener as a service with dependency injection
-        $context->registerService(UserSearchListener::class, function(IServerContainer $c) {
+        $context->registerService(UserSearchListener::class, function($c) {
             return new UserSearchListener(
                 $c->get(LdapOuService::class),
                 $c->get(\OCP\IUserSession::class),
