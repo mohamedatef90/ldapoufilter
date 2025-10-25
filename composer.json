@@ -1,0 +1,14 @@
+{
+    "name": "nextcloud/ldapoufilter",
+    "description": "LDAP OU-based user filtering for Nextcloud",
+    "type": "project",
+    "license": "AGPL-3.0-or-later",
+    "require": {
+        "php": "^8.1"
+    },
+    "autoload": {
+        "psr-4": {
+            "OCA\\LdapOuFilter\\": "lib/"
+        }
+    }
+}

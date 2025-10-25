@@ -1,0 +1,46 @@
+# IDE and Editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Composer
+/vendor/
+composer.lock
+
+# Build files
+/build/
+/dist/
+*.tar.gz
+*.zip
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Testing
+/coverage/
+/.phpunit.cache/
+phpunit.xml
+
+# Environment
+.env
+.env.local
+
+# Nextcloud specific
+/data/
+/config/config.php
+
+# Temporary files
+/tmp/
+*.tmp
+*.bak
+*.backup
+
+# OS specific
+Thumbs.db
+Desktop.ini

@@ -1,0 +1,16 @@
+<?xml version="1.0"?>
+<info xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+      xsi:noNamespaceSchemaLocation="https://apps.nextcloud.com/schema/apps/info.xsd">
+    <id>ldapoufilter</id>
+    <name>LDAP OU Filter</name>
+    <summary>Filter user suggestions by LDAP OU</summary>
+    <description><![CDATA[Filters user suggestions in sharing and mentions to show only users from the same LDAP OU]]></description>
+    <version>1.0.0</version>
+    <licence>agpl</licence>
+    <author>LDAP OU Filter</author>
+    <namespace>LdapOuFilter</namespace>
+    <category>tools</category>
+    <dependencies>
+        <nextcloud min-version="31" max-version="32"/>
+    </dependencies>
+</info>
