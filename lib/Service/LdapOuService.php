@@ -4,22 +4,25 @@ namespace OCA\LdapOuFilter\Service;
 use OCP\IUserManager;
 use OCP\IConfig;
 use Psr\Log\LoggerInterface;
+use OCP\IServerContainer;
 
 class LdapOuService {
     private IUserManager $userManager;
     private IConfig $config;
     private LoggerInterface $logger;
+    private IServerContainer $serverContainer;
     private array $ouCache = [];
-    private $ldapConnection = null;
     
     public function __construct(
         IUserManager $userManager,
         IConfig $config,
-        LoggerInterface $logger
+        LoggerInterface $logger,
+        IServerContainer $serverContainer
     ) {
         $this->userManager = $userManager;
         $this->config = $config;
         $this->logger = $logger;
+        $this->serverContainer = $serverContainer;
     }
     
     /**
@@ -32,8 +35,8 @@ class LdapOuService {
         }
         
         try {
-            // Get LDAP DN for user
-            $userDn = $this->getLdapDn($userId);
+            // Get LDAP DN for user using Nextcloud's LDAP user manager
+            $userDn = $this->getLdapDnViaNextcloud($userId);
             if (!$userDn) {
                 $this->logger->debug("Could not find DN for user: $userId");
                 return null;
@@ -59,114 +62,48 @@ class LdapOuService {
     }
     
     /**
-     * Get LDAP connection
+     * Get LDAP DN for a user using Nextcloud's LDAP user manager
      */
-    private function getLdapConnection() {
-        if ($this->ldapConnection !== null) {
-            return $this->ldapConnection;
-        }
-        
+    private function getLdapDnViaNextcloud(string $userId): ?string {
         try {
-            // Get first LDAP configuration (s01)
-            $configPrefix = 's01';
-            
-            $ldapHost = $this->config->getAppValue('user_ldap', $configPrefix . 'ldap_host', '');
-            $ldapPort = $this->config->getAppValue('user_ldap', $configPrefix . 'ldap_port', '389');
-            
-            if (empty($ldapHost)) {
-                $this->logger->warning('LDAP host not configured');
+            // Get the user from Nextcloud's user manager
+            $user = $this->userManager->get($userId);
+            if (!$user) {
+                $this->logger->debug("User not found in Nextcloud: $userId");
                 return null;
             }
             
-            // Connect to LDAP
-            $this->ldapConnection = @ldap_connect($ldapHost, intval($ldapPort));
-            
-            if (!$this->ldapConnection) {
-                $this->logger->error('Failed to connect to LDAP server');
+            // Check if this is an LDAP user
+            $backend = $user->getBackend();
+            if (!$backend instanceof \OCA\User_LDAP\User_Proxy) {
+                $this->logger->debug("User $userId is not an LDAP user");
                 return null;
             }
             
-            // Set LDAP options
-            ldap_set_option($this->ldapConnection, LDAP_OPT_PROTOCOL_VERSION, 3);
-            ldap_set_option($this->ldapConnection, LDAP_OPT_REFERRALS, 0);
-            ldap_set_option($this->ldapConnection, LDAP_OPT_NETWORK_TIMEOUT, 10);
+            // Get the LDAP user object
+            $ldapUser = $backend->getLDAPUserByLoginName($userId);
+            if (!$ldapUser) {
+                $this->logger->debug("Could not get LDAP user object for: $userId");
+                return null;
+            }
             
-            return $this->ldapConnection;
+            // Get the DN from the LDAP user object
+            $dn = $ldapUser->getDN();
+            if (!$dn) {
+                $this->logger->debug("No DN found for LDAP user: $userId");
+                return null;
+            }
+            
+            $this->logger->debug("Found DN for user $userId: $dn");
+            return $dn;
             
         } catch (\Exception $e) {
-            $this->logger->error('Error connecting to LDAP', [
+            $this->logger->error('Error getting LDAP DN via Nextcloud for user', [
+                'userId' => $userId,
                 'exception' => $e->getMessage()
             ]);
             return null;
         }
-    }
-    
-    /**
-     * Get LDAP DN for a user
-     */
-    private function getLdapDn(string $userId): ?string {
-        try {
-            $conn = $this->getLdapConnection();
-            if (!$conn) {
-                return null;
-            }
-            
-            // Get LDAP configuration
-            $configPrefix = 's01';
-            $ldapBaseDn = $this->config->getAppValue('user_ldap', $configPrefix . 'ldap_base', '');
-            $ldapBindDn = $this->config->getAppValue('user_ldap', $configPrefix . 'ldap_dn', '');
-            $ldapBindPassword = $this->config->getAppValue('user_ldap', $configPrefix . 'ldap_agent_password', '');
-            
-            // Bind to LDAP
-            if (!@ldap_bind($conn, $ldapBindDn, $ldapBindPassword)) {
-                $this->logger->error('Failed to bind to LDAP');
-                return null;
-            }
-            
-            // Search for user - try multiple attributes
-            // Escape special LDAP characters in userId
-            $escapedUserId = ldap_escape($userId, '', LDAP_ESCAPE_FILTER);
-            
-            $filters = [
-                "(uid=$escapedUserId)",
-                "(sAMAccountName=$escapedUserId)",
-                "(cn=$escapedUserId)",
-                "(mail=$escapedUserId)",
-                "(userPrincipalName=$escapedUserId)"
-            ];
-            
-            foreach ($filters as $filter) {
-                $search = @ldap_search($conn, $ldapBaseDn, $filter, ['dn']);
-                
-                if ($search) {
-                    $entries = ldap_get_entries($conn, $search);
-                    if ($entries['count'] > 0) {
-                        return $entries[0]['dn'];
-                    }
-                }
-            }
-            
-            // Try with combined filter
-            $combinedFilter = "(|(uid=$escapedUserId)(sAMAccountName=$escapedUserId)(cn=$escapedUserId)(userPrincipalName=$escapedUserId))";
-            $this->logger->debug("Searching LDAP with filter: $combinedFilter in base: $ldapBaseDn");
-            
-            $search = @ldap_search($conn, $ldapBaseDn, $combinedFilter, ['dn']);
-            
-            if ($search) {
-                $entries = ldap_get_entries($conn, $search);
-                if ($entries['count'] > 0) {
-                    return $entries[0]['dn'];
-                }
-            }
-            
-        } catch (\Exception $e) {
-            $this->logger->error('Error getting LDAP DN for user', [
-                'userId' => $userId,
-                'exception' => $e->getMessage()
-            ]);
-        }
-        
-        return null;
     }
     
 /**
@@ -311,12 +248,4 @@ class LdapOuService {
         }
     }
     
-    /**
-     * Close LDAP connection
-     */
-    public function __destruct() {
-        if ($this->ldapConnection !== null) {
-            @ldap_close($this->ldapConnection);
-        }
-    }
 }

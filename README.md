@@ -15,6 +15,25 @@
 chmod +x deploy_to_server.sh && ./deploy_to_server.sh
 ```
 
+## 🔧 Recent Fix (v1.1)
+
+**Fixed LDAP Connection Issues** - The app now uses Nextcloud's existing LDAP configuration instead of creating its own connection, eliminating authentication errors and improving reliability.
+
+### What was fixed:
+- ❌ **Before**: App tried to create separate LDAP connections with wrong credentials
+- ✅ **After**: App uses Nextcloud's LDAP user manager for seamless integration
+- ✅ **Result**: No more "Failed to bind to LDAP" errors
+- ✅ **Result**: Proper OU detection and filtering
+
+### Testing the fix:
+```bash
+# Test the LDAP OU service
+php test_ldap_fix.php
+
+# Check app logs
+tail -f /var/www/nextcloud/data/nextcloud.log | grep ldapoufilter
+```
+
 ## التثبيت
 
 ### 1. نقل المجلد للسيرفر

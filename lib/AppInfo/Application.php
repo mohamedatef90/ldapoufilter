@@ -28,7 +28,8 @@ class Application extends App implements IBootstrap {
             return new LdapOuService(
                 $c->get(\OCP\IUserManager::class),
                 $c->get(\OCP\IConfig::class),
-                $c->get(\Psr\Log\LoggerInterface::class)
+                $c->get(\Psr\Log\LoggerInterface::class),
+                $c->get(\OCP\IServerContainer::class)
             );
         });
         
