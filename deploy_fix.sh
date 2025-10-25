@@ -13,7 +13,7 @@ if [ ! -f "lib/Service/LdapOuService.php" ]; then
 fi
 
 # Server details (update these for your server)
-SERVER="192.168.2.10"
+SERVER="192.168.2.68"
 SERVER_PATH="/var/www/nextcloud/apps/ldapoufilter"
 USER="root"
 
