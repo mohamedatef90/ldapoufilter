@@ -11,6 +11,7 @@ use OCA\LdapOuFilter\Listener\UserSearchListener;
 use OCA\LdapOuFilter\Service\LdapOuService;
 use OCP\Collaboration\Collaborators\SearchResultEvent;
 use OCP\IServerContainer;
+use OCP\EventDispatcher\IEventDispatcher;
 
 class Application extends App implements IBootstrap {
     public const APP_ID = 'ldapoufilter';
@@ -51,5 +52,22 @@ class Application extends App implements IBootstrap {
         // Log that the app has booted successfully
         $logger = $server->get(\Psr\Log\LoggerInterface::class);
         $logger->info('LDAP OU Filter app booted successfully', ['app' => self::APP_ID]);
+        
+        // ADDITIONAL: Register event listener directly via Event Dispatcher
+        // This ensures the listener is registered even if the Bootstrap registration fails
+        try {
+            $dispatcher = $server->get(IEventDispatcher::class);
+            $listener = $server->get(UserSearchListener::class);
+            
+            // Register with high priority (early execution)
+            $dispatcher->addListener(SearchResultEvent::class, function($event) use ($listener, $logger) {
+                $logger->info('SearchResultEvent detected! Calling listener...', ['app' => self::APP_ID]);
+                $listener->handle($event);
+            }, 100);
+            
+            $logger->info('Event listener registered directly via dispatcher', ['app' => self::APP_ID]);
+        } catch (\Exception $e) {
+            $logger->error('Failed to register event listener: ' . $e->getMessage(), ['app' => self::APP_ID]);
+        }
     }
 }

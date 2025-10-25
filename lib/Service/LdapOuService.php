@@ -171,13 +171,20 @@ class LdapOuService {
     
 /**
      * Extract OU from DN string
-     * Example DN: CN=bebo,OU=Mail,OU=cyberfirst,DC=first,DC=loc
+     * For nested OUs, returns the MOST SPECIFIC (immediate parent) OU
+     * 
+     * Example DN structures:
+     * - CN=hunter1,OU=cyberfirst,OU=Mail,DC=Frist,DC=loc
+     * - CN=user,OU=Mail,OU=first,DC=Frist,DC=loc
+     * 
+     * We want to extract the specific sub-OU (cyberfirst, first, elzoz, bebo)
+     * NOT the parent "Mail" OU
      */
     private function extractOuFromDn(string $dn): string {
-        $this->logger->debug("Extracting OU from DN: $dn");
+        $this->logger->info("=== OU EXTRACTION DEBUG ===", ['app' => 'ldapoufilter']);
+        $this->logger->info("DN: $dn", ['app' => 'ldapoufilter']);
         
         // Parse DN to get OU parts
-        // Use explode instead of ldap_explode_dn for better handling
         $dnParts = explode(',', $dn);
         $ouParts = [];
         
@@ -188,27 +195,43 @@ class LdapOuService {
             }
         }
         
-        // Log found OUs
-        $this->logger->debug("Found OUs: " . implode(', ', $ouParts));
+        $this->logger->info("Found " . count($ouParts) . " OU levels: " . json_encode($ouParts), ['app' => 'ldapoufilter']);
         
-        // Return the first OU (immediate OU)
-        // You can change this to return different OU levels
-        if (!empty($ouParts)) {
-            // Return first OU (e.g., OU=Mail)
-            $selectedOu = $ouParts[0];
-            
-            // Or return parent OU (e.g., OU=cyberfirst) 
-            // $selectedOu = isset($ouParts[1]) ? $ouParts[1] : $ouParts[0];
-            
-            // Or return full OU path
-            // $selectedOu = implode(',', $ouParts);
-            
-            $this->logger->debug("Selected OU: $selectedOu");
-            return $selectedOu;
+        if (empty($ouParts)) {
+            $this->logger->warning("No OU found in DN: $dn");
+            return '';
         }
         
-        $this->logger->warning("No OU found in DN: $dn");
-        return '';
+        // STRATEGY: Find the most specific OU (not "Mail")
+        // We'll use the LAST OU that is NOT "Mail"
+        $selectedOu = '';
+        
+        // Filter out "Mail" OU and use the most specific one
+        $specificOus = array_filter($ouParts, function($ou) {
+            $ouValue = strtolower(trim(substr($ou, 3))); // Remove "OU=" prefix
+            return $ouValue !== 'mail';
+        });
+        
+        if (!empty($specificOus)) {
+            // Use the first specific OU (closest to the user)
+            $selectedOu = reset($specificOus);
+            $this->logger->info("Selected specific OU (filtered out 'Mail'): $selectedOu", ['app' => 'ldapoufilter']);
+        } else {
+            // Fallback: If we can't filter out Mail, try using the second OU if available
+            if (count($ouParts) > 1) {
+                // Try second OU (might be the specific one)
+                $selectedOu = $ouParts[1];
+                $this->logger->info("Selected second OU as fallback: $selectedOu", ['app' => 'ldapoufilter']);
+            } else {
+                // Last resort: use first OU
+                $selectedOu = $ouParts[0];
+                $this->logger->info("Selected first OU as last resort: $selectedOu", ['app' => 'ldapoufilter']);
+            }
+        }
+        
+        $this->logger->info("=== FINAL SELECTED OU: $selectedOu ===", ['app' => 'ldapoufilter']);
+        
+        return $selectedOu;
     }
     
     /**

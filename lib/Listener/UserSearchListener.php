@@ -24,11 +24,14 @@ class UserSearchListener implements IEventListener {
     }
     
     public function handle(Event $event): void {
+        $this->logger->info('UserSearchListener::handle called with event: ' . get_class($event), ['app' => 'ldapoufilter']);
+        
         if (!($event instanceof SearchResultEvent)) {
+            $this->logger->warning('Event is not SearchResultEvent, it is: ' . get_class($event), ['app' => 'ldapoufilter']);
             return;
         }
         
-        $this->logger->info('UserSearchListener triggered', ['app' => 'ldapoufilter']);
+        $this->logger->info('UserSearchListener triggered - SearchResultEvent confirmed!', ['app' => 'ldapoufilter']);
         
         $currentUser = $this->userSession->getUser();
         if (!$currentUser) {
@@ -39,29 +42,41 @@ class UserSearchListener implements IEventListener {
         $currentUserId = $currentUser->getUID();
         $this->logger->info("Starting to filter search results for user: $currentUserId", ['app' => 'ldapoufilter']);
         
-        $searchResult = $event->getSearchResult();
-        
-        // Filter users in search results
-        if ($searchResult->hasResult('users')) {
-            $users = $searchResult->getResult('users');
-            $this->logger->debug("Original users in search: " . json_encode($users));
+        try {
+            $searchResult = $event->getSearchResult();
+            $this->logger->info('Got search result object', ['app' => 'ldapoufilter']);
             
-            $filteredUsers = $this->filterSearchResults($users, $currentUserId);
+            // Filter users in search results
+            if ($searchResult->hasResult('users')) {
+                $users = $searchResult->getResult('users');
+                $this->logger->info("Original users count: " . count($users['results'] ?? []), ['app' => 'ldapoufilter']);
+                
+                $filteredUsers = $this->filterSearchResults($users, $currentUserId);
+                
+                // Update the search results with filtered users
+                $searchResult->unsetResult('users');
+                $searchResult->addResultSet('users', $filteredUsers['results'], $filteredUsers['exact']);
+                
+                $this->logger->info("Filtered users count: " . count($filteredUsers['results']), ['app' => 'ldapoufilter']);
+            } else {
+                $this->logger->info('No users in search results', ['app' => 'ldapoufilter']);
+            }
             
-            // Update the search results with filtered users
-            $searchResult->unsetResult('users');
-            $searchResult->addResultSet('users', $filteredUsers['results'], $filteredUsers['exact']);
-            
-            $this->logger->debug("Filtered users in search: " . json_encode($filteredUsers));
-        }
-        
-        // Also filter remotes if they exist
-        if ($searchResult->hasResult('remotes')) {
-            $remotes = $searchResult->getResult('remotes');
-            $filteredRemotes = $this->filterSearchResults($remotes, $currentUserId);
-            
-            $searchResult->unsetResult('remotes');
-            $searchResult->addResultSet('remotes', $filteredRemotes['results'], $filteredRemotes['exact']);
+            // Also filter remotes if they exist
+            if ($searchResult->hasResult('remotes')) {
+                $remotes = $searchResult->getResult('remotes');
+                $filteredRemotes = $this->filterSearchResults($remotes, $currentUserId);
+                
+                $searchResult->unsetResult('remotes');
+                $searchResult->addResultSet('remotes', $filteredRemotes['results'], $filteredRemotes['exact']);
+                
+                $this->logger->info('Filtered remotes', ['app' => 'ldapoufilter']);
+            }
+        } catch (\Exception $e) {
+            $this->logger->error('Error filtering search results: ' . $e->getMessage(), [
+                'app' => 'ldapoufilter',
+                'exception' => $e->getTraceAsString()
+            ]);
         }
     }
     
