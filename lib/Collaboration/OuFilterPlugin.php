@@ -5,7 +5,7 @@ namespace OCA\LdapOuFilter\Collaboration;
 
 use OCP\Collaboration\Collaborators\ISearchPlugin;
 use OCP\Collaboration\Collaborators\ISearchResult;
-use OCP\Collaboration\Collaborators\SearchResultType;
+use OCP\Collaboration\Search\SearchResultType;
 use OCP\Share\IShare;
 use OCA\LdapOuFilter\Service\LdapOuService;
 use OCP\IUserSession;
@@ -139,13 +139,13 @@ class OuFilterPlugin implements ISearchPlugin {
             // This prevents returning empty results (which causes 500 errors)
             if ($filteredCount > 0 && $filteredCount < $originalCount) {
                 // Use unsetResult and addResultSet to replace the results
-                $searchResult->unsetResult(SearchResultType::User);
-                $searchResult->addResultSet(SearchResultType::User, $filteredResults, []);
+                $searchResult->unsetResult(SearchResultType::USER);
+                $searchResult->addResultSet(SearchResultType::USER, $filteredResults, []);
                 $this->logger->info("==> Filtered results: $originalCount -> $filteredCount users", ['app' => 'ldapoufilter']);
             } elseif ($filteredCount === 0) {
                 // No users in same OU found - return empty results but don't throw error
-                $searchResult->unsetResult(SearchResultType::User);
-                $searchResult->addResultSet(SearchResultType::User, [], []);
+                $searchResult->unsetResult(SearchResultType::USER);
+                $searchResult->addResultSet(SearchResultType::USER, [], []);
                 $this->logger->info("==> No users in same OU found (filtered out all $originalCount users)", ['app' => 'ldapoufilter']);
             } else {
                 // All users already in same OU - no filtering needed
