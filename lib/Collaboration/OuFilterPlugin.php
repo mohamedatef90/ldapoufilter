@@ -73,7 +73,16 @@ class OuFilterPlugin implements ISearchPlugin {
     private function filterSearchResultType(ISearchResult $searchResult, string $type, string $currentUserId, string $currentUserOu): bool {
         try {
             // Get the result type
-            $results = $searchResult->asArray()['users'] ?? [];
+            $searchArray = $searchResult->asArray();
+            $usersData = $searchArray['users'] ?? [];
+            
+            // Handle different array structures
+            $results = [];
+            if (is_array($usersData) && isset($usersData['results'])) {
+                $results = $usersData['results'];
+            } elseif (is_array($usersData)) {
+                $results = $usersData;
+            }
 
             if (empty($results)) {
                 $this->logger->info("No results to filter", ['app' => 'ldapoufilter']);
@@ -88,10 +97,18 @@ class OuFilterPlugin implements ISearchPlugin {
             $filteredCount = 0;
             
             foreach ($results as $result) {
-                $userId = $result['value']['shareWith'] ?? $result['value']['name'] ?? null;
+                // Try multiple ways to get the user ID
+                $userId = null;
+                if (is_array($result)) {
+                    $userId = $result['value']['shareWith'] ?? 
+                              $result['value']['name'] ?? 
+                              $result['shareWith'] ?? 
+                              $result['name'] ??
+                              null;
+                }
                 
                 if (!$userId) {
-                    $this->logger->debug("Skipping result without userId", ['app' => 'ldapoufilter']);
+                    $this->logger->debug("Skipping result without userId", ['app' => 'ldapoufilter', 'result' => json_encode($result)]);
                     continue;
                 }
 
@@ -111,9 +128,12 @@ class OuFilterPlugin implements ISearchPlugin {
                 }
             }
 
-            // Use unsetResult and addResultSet to replace the results
-            $searchResult->unsetResult('users');
-            $searchResult->addResultSet('users', $filteredResults, []);
+            // Only update if we have filtered results
+            if ($filteredCount < $originalCount) {
+                // Use unsetResult and addResultSet to replace the results
+                $searchResult->unsetResult('users');
+                $searchResult->addResultSet('users', $filteredResults, []);
+            }
 
             $this->logger->info("==> Filtered results: $originalCount -> $filteredCount users", ['app' => 'ldapoufilter']);
             return true;
