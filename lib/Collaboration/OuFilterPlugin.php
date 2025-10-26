@@ -83,11 +83,10 @@ class OuFilterPlugin implements ISearchPlugin {
             $originalCount = count($results);
             $this->logger->info("Filtering $originalCount results", ['app' => 'ldapoufilter']);
 
-            // Clear all results first
-            $searchResult->clear();
-
-            // Filter results based on OU and add back only matching ones
+            // Build filtered array - only include users in same OU
+            $filteredResults = [];
             $filteredCount = 0;
+            
             foreach ($results as $result) {
                 $userId = $result['value']['shareWith'] ?? $result['value']['name'] ?? null;
                 
@@ -103,14 +102,18 @@ class OuFilterPlugin implements ISearchPlugin {
                 $this->logger->debug("  User OU: " . ($userOu ?: 'none'), ['app' => 'ldapoufilter']);
 
                 if ($userOu && $userOu === $currentUserOu) {
-                    // Same OU - add back
-                    $searchResult->addResult($result);
+                    // Same OU - keep in filtered results
+                    $filteredResults[] = $result;
                     $filteredCount++;
                     $this->logger->debug("✓ User $userId kept (same OU: $userOu)", ['app' => 'ldapoufilter']);
                 } else {
                     $this->logger->debug("✗ User $userId filtered out (current OU: $currentUserOu, user OU: " . ($userOu ?: 'none') . ")", ['app' => 'ldapoufilter']);
                 }
             }
+
+            // Use unsetResult and addResultSet to replace the results
+            $searchResult->unsetResult('users');
+            $searchResult->addResultSet('users', $filteredResults, []);
 
             $this->logger->info("==> Filtered results: $originalCount -> $filteredCount users", ['app' => 'ldapoufilter']);
             return true;
