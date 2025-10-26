@@ -47,10 +47,22 @@ class OuFilterPlugin implements ISearchPlugin {
 
         $currentUserId = $currentUser->getUID();
         $this->logger->info("Current user: $currentUserId", ['app' => 'ldapoufilter']);
+        
+        // Get current user's OU
+        $currentUserOu = $this->ldapOuService->getUserOu($currentUserId);
+        if (!$currentUserOu) {
+            $this->logger->warning("No OU found for current user: $currentUserId", ['app' => 'ldapoufilter']);
+            return false;
+        }
+        
+        $this->logger->info("Current user OU: $currentUserOu", ['app' => 'ldapoufilter']);
 
         // Filter users in the search results
-        $this->filterSearchResultType($searchResult, 'users', $currentUserId);
-        $this->filterSearchResultType($searchResult, 'exact', $currentUserId);
+        $filtered = $this->filterSearchResultType($searchResult, 'users', $currentUserId, $currentUserOu);
+        
+        if ($filtered) {
+            $this->logger->info("Successfully filtered search results", ['app' => 'ldapoufilter']);
+        }
 
         return false; // Return false to allow other plugins to process too
     }
@@ -58,58 +70,57 @@ class OuFilterPlugin implements ISearchPlugin {
     /**
      * Filter a specific result type (users or exact matches)
      */
-    private function filterSearchResultType(ISearchResult $searchResult, string $type, string $currentUserId): void {
+    private function filterSearchResultType(ISearchResult $searchResult, string $type, string $currentUserId, string $currentUserOu): bool {
         try {
             // Get the result type
-            if ($type === 'users') {
-                $results = $searchResult->asArray()['users'] ?? [];
-            } elseif ($type === 'exact') {
-                $results = $searchResult->asArray()['exact']['users'] ?? [];
-            } else {
-                return;
-            }
+            $results = $searchResult->asArray()['users'] ?? [];
 
             if (empty($results)) {
-                $this->logger->info("No $type results to filter", ['app' => 'ldapoufilter']);
-                return;
+                $this->logger->info("No results to filter", ['app' => 'ldapoufilter']);
+                return false;
             }
 
             $originalCount = count($results);
-            $this->logger->info("Filtering $originalCount $type results", ['app' => 'ldapoufilter']);
+            $this->logger->info("Filtering $originalCount results", ['app' => 'ldapoufilter']);
 
-            // Filter results based on OU
-            $filteredResults = [];
+            // Clear all results first
+            $searchResult->clear();
+
+            // Filter results based on OU and add back only matching ones
+            $filteredCount = 0;
             foreach ($results as $result) {
-                $userId = $result['value']['shareWith'] ?? null;
+                $userId = $result['value']['shareWith'] ?? $result['value']['name'] ?? null;
                 
                 if (!$userId) {
-                    $this->logger->debug("Skipping result without shareWith field", ['app' => 'ldapoufilter']);
+                    $this->logger->debug("Skipping result without userId", ['app' => 'ldapoufilter']);
                     continue;
                 }
 
                 $this->logger->debug("Checking user: $userId", ['app' => 'ldapoufilter']);
 
-                if ($this->ldapOuService->areUsersInSameOu($currentUserId, $userId)) {
-                    $filteredResults[] = $result;
-                    $this->logger->debug("✓ User $userId kept (same OU)", ['app' => 'ldapoufilter']);
+                // Check if this user is in the same OU
+                $userOu = $this->ldapOuService->getUserOu($userId);
+                $this->logger->debug("  User OU: " . ($userOu ?: 'none'), ['app' => 'ldapoufilter']);
+
+                if ($userOu && $userOu === $currentUserOu) {
+                    // Same OU - add back
+                    $searchResult->addResult($result);
+                    $filteredCount++;
+                    $this->logger->debug("✓ User $userId kept (same OU: $userOu)", ['app' => 'ldapoufilter']);
                 } else {
-                    $this->logger->debug("✗ User $userId filtered out (different OU)", ['app' => 'ldapoufilter']);
+                    $this->logger->debug("✗ User $userId filtered out (current OU: $currentUserOu, user OU: " . ($userOu ?: 'none') . ")", ['app' => 'ldapoufilter']);
                 }
             }
 
-            $filteredCount = count($filteredResults);
-            $this->logger->info("==> Filtered $type: $originalCount -> $filteredCount users", ['app' => 'ldapoufilter']);
-
-            // Update the search results
-            // Note: ISearchResult doesn't have a direct "replace" method,
-            // so we mark filtered users as not found by not adding them back
-            // This is a limitation of the current API
+            $this->logger->info("==> Filtered results: $originalCount -> $filteredCount users", ['app' => 'ldapoufilter']);
+            return true;
 
         } catch (\Exception $e) {
-            $this->logger->error("Error filtering $type results: " . $e->getMessage(), [
+            $this->logger->error("Error filtering results: " . $e->getMessage(), [
                 'app' => 'ldapoufilter',
                 'exception' => $e->getTraceAsString()
             ]);
+            return false;
         }
     }
 }
