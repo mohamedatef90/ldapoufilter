@@ -110,29 +110,19 @@ try {
         foreach ($knownLdapUsers as $uuid => $displayName) {
             echo "\nUser: $displayName ($uuid)\n";
             
-            // First check if the user can be found by userManager
-            $user = $userManager->get($uuid);
-            if ($user) {
-                echo "  ✓ User found\n";
-                echo "  Backend: " . get_class($user->getBackend()) . "\n";
-                echo "  Display Name: " . $user->getDisplayName() . "\n";
-                
-                // Now try to extract OU
-                echo "  Attempting to extract OU...\n";
-                try {
-                    $ou = $service->getUserOu($uuid);
-                    if ($ou) {
-                        echo "  ✓ OU found: $ou\n";
-                        $testUsers[$displayName] = $uuid;
-                    } else {
-                        echo "  ✗ No OU found\n";
-                    }
-                } catch (\Exception $e) {
-                    echo "  ✗ Error extracting OU: " . $e->getMessage() . "\n";
+            // Try to extract OU directly (bypasses userManager)
+            echo "  Attempting to extract OU...\n";
+            try {
+                $ou = $service->getUserOu($uuid);
+                if ($ou) {
+                    echo "  ✓ OU found: $ou\n";
+                    $testUsers[$displayName] = $uuid;
+                } else {
+                    echo "  ✗ No OU found\n";
                 }
-            } else {
-                echo "  ✗ User not found in userManager\n";
-                echo "  This user may not exist in the current session\n";
+            } catch (\Exception $e) {
+                echo "  ✗ Error extracting OU: " . $e->getMessage() . "\n";
+                echo "    " . $e->getTraceAsString() . "\n";
             }
         }
     }
