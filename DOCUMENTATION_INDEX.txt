@@ -1,0 +1,44 @@
+# LDAP OU Filter - Documentation Index
+
+## 📚 Main Documentation Files (Read These)
+
+1. START_HERE.md ⭐
+   → Start here! Overview and navigation
+
+2. README.md
+   → Quick overview and installation
+
+3. QUICK_START.md
+   → 5-minute installation guide
+
+4. INSTALLATION_GUIDE.md
+   → Complete setup & testing (14 pages)
+
+5. DEPLOYMENT_SUMMARY.md
+   → Technical details & code explanation
+
+6. README_COMPLETE.md
+   → Full development reference
+
+7. DELIVERY_PACKAGE.md
+   → What's included in this package
+
+8. README_ENGLISH.md
+   → English overview
+
+## 🗂️ Important Historical Files
+
+- INSTALL.md (Arabic installation instructions)
+- OU_FIX_GUIDE.md (OU extraction fix guide)
+- DEPLOYMENT_GUIDE.md (Original deployment guide)
+- FIX_INSTRUCTIONS.md (Original fix instructions)
+
+## 🎯 Recommended Reading Order
+
+1. START_HERE.md (2 min)
+2. Choose your path:
+   - Quick: QUICK_START.md (5 min)
+   - Complete: INSTALLATION_GUIDE.md (15 min)
+   - Technical: DEPLOYMENT_SUMMARY.md (30 min)
+3. For reference: README_COMPLETE.md (60 min)
+

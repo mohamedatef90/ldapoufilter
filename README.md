@@ -1,97 +1,199 @@
 # LDAP OU Filter for Nextcloud
 
-## الوصف
-تطبيق Nextcloud يقوم بفلترة المستخدمين المقترحين في عمليات المشاركة بناءً على الوحدة التنظيمية (OU) في LDAP/Active Directory.
+## 🎯 What This Does
 
-## 🚀 Quick Start
+Automatically filters Nextcloud user search results to show **only users from the same Organizational Unit (OU)** in LDAP/Active Directory.
 
-**NEW! The app has been fixed and is ready to deploy.**
+**Example**: Users in `cyberfirst` OU will only see and be able to share with other `cyberfirst` users, not users from `bebo` or other OUs.
 
-- **Super Quick Deploy**: See [QUICKSTART.md](QUICKSTART.md) - Deploy in 1 command!
-- **Detailed Guide**: See [DEPLOYMENT_GUIDE.md](DEPLOYMENT_GUIDE.md) - Complete instructions and troubleshooting
+---
 
-### One-Command Deploy:
+## ⚡ Quick Start (3 Steps)
+
 ```bash
-chmod +x deploy_to_server.sh && ./deploy_to_server.sh
+# 1. Upload to server
+scp -r ldapoufilter root@YOUR_SERVER:/var/www/nextcloud/apps/
+
+# 2. Set permissions and enable
+ssh root@YOUR_SERVER "chown -R www-data:www-data /var/www/nextcloud/apps/ldapoufilter && sudo -u www-data php /var/www/nextcloud/occ app:enable ldapoufilter"
+
+# 3. Verify
+ssh root@YOUR_SERVER "tail -20 /var/www/nextcloud/data/nextcloud.log | grep ldapoufilter"
 ```
 
-## 🔧 Recent Fix (v1.1)
+Expected output:
+```
+LDAP OU Filter app booted successfully
+✓ OU Filter Plugin registered with Collaborators Manager
+```
 
-**Fixed LDAP Connection Issues** - The app now uses Nextcloud's existing LDAP configuration instead of creating its own connection, eliminating authentication errors and improving reliability.
+**Done!** The app is now filtering users by OU.
 
-### What was fixed:
-- ❌ **Before**: App tried to create separate LDAP connections with wrong credentials
-- ✅ **After**: App uses Nextcloud's LDAP user manager for seamless integration
-- ✅ **Result**: No more "Failed to bind to LDAP" errors
-- ✅ **Result**: Proper OU detection and filtering
+---
 
-### Testing the fix:
+## 📚 Documentation
+
+| Document | Purpose | Read Time |
+|----------|---------|-----------|
+| **[START_HERE.md](START_HERE.md)** | Overview & navigation | 2 min |
+| **[QUICK_START.md](QUICK_START.md)** | Fast installation | 5 min |
+| **[INSTALLATION_GUIDE.md](INSTALLATION_GUIDE.md)** | Complete setup | 15 min |
+| **[DEPLOYMENT_SUMMARY.md](DEPLOYMENT_SUMMARY.md)** | Technical details | 30 min |
+| **[README_COMPLETE.md](README_COMPLETE.md)** | Full reference | 60 min |
+| **[DELIVERY_PACKAGE.md](DELIVERY_PACKAGE.md)** | What's included | 10 min |
+
+**Start with**: [START_HERE.md](START_HERE.md)
+
+---
+
+## ✅ Features
+
+- ✅ **Automatic**: No configuration needed
+- ✅ **Transparent**: Works in background
+- ✅ **Fast**: Database-backed with caching
+- ✅ **Secure**: OU-based organizational boundaries
+- ✅ **Error-Resilient**: Handles edge cases gracefully
+- ✅ **Universal**: Works in Files, Talk, and all sharing features
+
+---
+
+## 🔧 How It Works
+
+```
+User searches for "john" in share dialog
+         ↓
+Plugin intercepts search results
+         ↓
+Queries database for user OUs
+         ↓
+Filters: same OU = keep, different OU = remove
+         ↓
+Returns filtered list to UI
+```
+
+**Database**: Uses `ldap_user_mapping` table (created by Nextcloud LDAP app)  
+**Query**: Gets LDAP DN, extracts OU from DN  
+**Filter**: Compares current user's OU with searched users' OUs
+
+---
+
+## 📋 Requirements
+
+- Nextcloud 31.0 or later
+- PHP 8.0 or later  
+- LDAP/Active Directory configured
+- PostgreSQL or MySQL/MariaDB
+- LDAP users already synced to Nextcloud
+
+---
+
+## 🧪 Testing
+
 ```bash
-# Test the LDAP OU service
-php test_ldap_fix.php
+# Quick test
+sudo -u www-data php /var/www/nextcloud/apps/ldapoufilter/test_ou_server.php
 
-# Check app logs
-tail -f /var/www/nextcloud/data/nextcloud.log | grep ldapoufilter
+# UI test
+# Login → Files → Share → Search for users
+# You should only see users from your OU
 ```
 
-## التثبيت
+---
 
-### 1. نقل المجلد للسيرفر
+## 🐛 Troubleshooting
+
+### All users still visible?
 ```bash
-# انسخ المجلد ldapoufilter إلى مجلد التطبيقات في Nextcloud
-cp -r ldapoufilter /var/www/nextcloud/apps/
+# Check app is enabled
+sudo -u www-data php /var/www/nextcloud/occ app:list | grep ldapoufilter
+
+# Check plugin activation
+tail -100 /var/www/nextcloud/data/nextcloud.log | grep "OU Filter Plugin"
 ```
 
-### 2. تعيين الصلاحيات
+### 500 errors?
 ```bash
-chown -R www-data:www-data /var/www/nextcloud/apps/ldapoufilter
-chmod -R 755 /var/www/nextcloud/apps/ldapoufilter
+# Check logs
+tail -100 /var/www/nextcloud/data/nextcloud.log | grep ldapoufilter
 ```
 
-### 3. تفعيل التطبيق
-```bash
-sudo -u www-data php /var/www/nextcloud/occ app:enable ldapoufilter
+**For detailed troubleshooting**: See [INSTALLATION_GUIDE.md](INSTALLATION_GUIDE.md) - Troubleshooting section
+
+---
+
+## 📁 Project Structure
+
+```
+ldapoufilter/
+├── lib/
+│   ├── AppInfo/Application.php         # Bootstrap
+│   ├── Collaboration/OuFilterPlugin.php  # Main filter ⭐
+│   └── Service/LdapOuService.php       # OU retrieval ⭐
+├── appinfo/
+│   ├── info.xml
+│   └── routes.php
+└── Documentation (6 files)
 ```
 
-## التكوين
+---
 
-### تعديل مستوى الـ OU المطلوب
-في ملف `lib/Service/LdapOuService.php` في دالة `extractOuFromDn()`:
+## 🎯 Key Files
 
-```php
-// للحصول على OU الأول (المباشر) - مثال: OU=Mail
-return $ouParts[0];
+**lib/Collaboration/OuFilterPlugin.php**
+- Intercepts search results
+- Filters users by OU match
+- Returns filtered list to UI
 
-// للحصول على OU الثاني (الأب) - مثال: OU=cyberfirst  
-return isset($ouParts[1]) ? $ouParts[1] : $ouParts[0];
+**lib/Service/LdapOuService.php**
+- Queries `ldap_user_mapping` table
+- Extracts OU from LDAP DN
+- Caches results for performance
 
-// للحصول على كل OUs
-return implode(',', $ouParts);
-```
+**lib/AppInfo/Application.php**
+- Registers services
+- Hooks plugin into Nextcloud's Collaborators Manager
 
-## استكشاف الأخطاء
+---
 
-### تفعيل Debug Mode
-```bash
-# في ملف config.php
-'loglevel' => 0,
-```
+## 📝 Installation Checklist
 
-### مراجعة السجلات
-```bash
-tail -f /var/www/nextcloud/data/nextcloud.log | grep ldapoufilter
-```
+- [ ] Upload files to `/var/www/nextcloud/apps/ldapoufilter`
+- [ ] Set permissions (`chown -R www-data:www-data`)
+- [ ] Enable app (`occ app:enable ldapoufilter`)
+- [ ] Verify in logs
+- [ ] Test in UI
 
-### التحقق من اتصال LDAP
-```bash
-sudo -u www-data php /var/www/nextcloud/occ ldap:test-config s01
-```
+---
 
-## المتطلبات
-- Nextcloud 31+
-- PHP 8.1+
-- LDAP/Active Directory مُعد ومتصل
-- تطبيق user_ldap مُفعّل
+## 🚀 What Was Fixed (v1.1)
 
-## الترخيص
+- ✅ Fixed database table name (`ldap_user_mapping`)
+- ✅ Proper error handling (no 500 errors)
+- ✅ Works with Talk autocomplete
+- ✅ Handles empty search results gracefully
+- ✅ Improved OU extraction logic
+
+---
+
+## 📞 Support
+
+1. **Quick issues**: [QUICK_START.md](QUICK_START.md)
+2. **Detailed help**: [INSTALLATION_GUIDE.md](INSTALLATION_GUIDE.md)
+3. **Technical details**: [DEPLOYMENT_SUMMARY.md](DEPLOYMENT_SUMMARY.md)
+
+---
+
+## 📜 License
+
 AGPL-3.0
+
+---
+
+**Version**: 1.1  
+**Status**: ✅ Production Ready  
+**Tested**: Nextcloud 31.0+  
+**Last Updated**: October 2025
+
+---
+
+**Need help?** Start with [START_HERE.md](START_HERE.md)

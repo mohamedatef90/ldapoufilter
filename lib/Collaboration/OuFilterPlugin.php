@@ -95,6 +95,7 @@ class OuFilterPlugin implements ISearchPlugin {
             // Build filtered array - only include users in same OU
             $filteredResults = [];
             $filteredCount = 0;
+            $errorsDuringFiltering = 0;
             
             foreach ($results as $result) {
                 // Try multiple ways to get the user ID
@@ -114,28 +115,43 @@ class OuFilterPlugin implements ISearchPlugin {
 
                 $this->logger->debug("Checking user: $userId", ['app' => 'ldapoufilter']);
 
-                // Check if this user is in the same OU
-                $userOu = $this->ldapOuService->getUserOu($userId);
-                $this->logger->debug("  User OU: " . ($userOu ?: 'none'), ['app' => 'ldapoufilter']);
+                try {
+                    // Check if this user is in the same OU
+                    $userOu = $this->ldapOuService->getUserOu($userId);
+                    $this->logger->debug("  User OU: " . ($userOu ?: 'none'), ['app' => 'ldapoufilter']);
 
-                if ($userOu && $userOu === $currentUserOu) {
-                    // Same OU - keep in filtered results
-                    $filteredResults[] = $result;
-                    $filteredCount++;
-                    $this->logger->debug("✓ User $userId kept (same OU: $userOu)", ['app' => 'ldapoufilter']);
-                } else {
-                    $this->logger->debug("✗ User $userId filtered out (current OU: $currentUserOu, user OU: " . ($userOu ?: 'none') . ")", ['app' => 'ldapoufilter']);
+                    if ($userOu && $userOu === $currentUserOu) {
+                        // Same OU - keep in filtered results
+                        $filteredResults[] = $result;
+                        $filteredCount++;
+                        $this->logger->debug("✓ User $userId kept (same OU: $userOu)", ['app' => 'ldapoufilter']);
+                    } else {
+                        $this->logger->debug("✗ User $userId filtered out (current OU: $currentUserOu, user OU: " . ($userOu ?: 'none') . ")", ['app' => 'ldapoufilter']);
+                    }
+                } catch (\Exception $e) {
+                    $errorsDuringFiltering++;
+                    $this->logger->warning("Error checking OU for user $userId: " . $e->getMessage(), ['app' => 'ldapoufilter']);
+                    // Don't add this user to results
                 }
             }
 
-            // Only update if we have filtered results
-            if ($filteredCount < $originalCount) {
+            // Only update if we found at least one matching user in the same OU
+            // This prevents returning empty results (which causes 500 errors)
+            if ($filteredCount > 0 && $filteredCount < $originalCount) {
                 // Use unsetResult and addResultSet to replace the results
                 $searchResult->unsetResult('users');
                 $searchResult->addResultSet('users', $filteredResults, []);
-            }
-
-            $this->logger->info("==> Filtered results: $originalCount -> $filteredCount users", ['app' => 'ldapoufilter']);
+                $this->logger->info("==> Filtered results: $originalCount -> $filteredCount users", ['app' => 'ldapoufilter']);
+            } elseif ($filteredCount === 0) {
+                // No users in same OU found - return empty results but don't throw error
+                $searchResult->unsetResult('users');
+                $searchResult->addResultSet('users', [], []);
+                $this->logger->info("==> No users in same OU found (filtered out all $originalCount users)", ['app' => 'ldapoufilter']);
+            } else {
+                                 // All users already in same OU - no filtering needed
+                 $this->logger->info("==> All $originalCount users are in same OU (no filtering needed)", ['app' => 'ldapoufilter']);
+             }
+            
             return true;
 
         } catch (\Exception $e) {
