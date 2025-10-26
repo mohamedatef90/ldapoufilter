@@ -86,10 +86,33 @@ class LdapOuService {
             ldap_set_option($conn, LDAP_OPT_NETWORK_TIMEOUT, 10);
             
             // Bind with Nextcloud's LDAP credentials
-            if (!@ldap_bind($conn, $ldapConfig['bindDN'], $ldapConfig['bindPassword'])) {
-                $this->logger->debug("Failed to bind to LDAP");
+            $bindDN = $ldapConfig['bindDN'];
+            $bindPassword = $ldapConfig['bindPassword'];
+            
+            $this->logger->debug("Attempting LDAP bind", [
+                'bindDN' => $bindDN,
+                'hasPassword' => !empty($bindPassword),
+                'passwordLength' => strlen($bindPassword),
+                'host' => $ldapConfig['host'],
+                'port' => $ldapConfig['port']
+            ]);
+            
+            $bindResult = @ldap_bind($conn, $bindDN, $bindPassword);
+            if (!$bindResult) {
+                $ldapError = @ldap_error($conn);
+                $ldapErrno = @ldap_errno($conn);
+                $this->logger->error("Failed to bind to LDAP", [
+                    'error' => $ldapError,
+                    'errno' => $ldapErrno,
+                    'bindDN' => $bindDN,
+                    'host' => $ldapConfig['host'],
+                    'port' => $ldapConfig['port']
+                ]);
+                @ldap_close($conn);
                 return null;
             }
+            
+            $this->logger->debug("Successfully bound to LDAP");
             
             // Search for user with multiple possible attributes
             $escapedUserId = ldap_escape($userId, '', LDAP_ESCAPE_FILTER);
@@ -154,6 +177,18 @@ class LdapOuService {
                     $isActive = $this->config->getAppValue('user_ldap', $prefix . 'ldap_configuration_active', '0');
                     
                     if ($isActive === '1' && !empty($ldapBindDN) && !empty($ldapBindPassword)) {
+                        // Try to get the password from credentials manager
+                        try {
+                            $credentialsManager = $this->serverContainer->get(\OCP\Security\ICredentialsManager::class);
+                            $credentials = $credentialsManager->retrieve('user_ldap', $prefix . 'ldap_agent_password');
+                            if ($credentials && isset($credentials['password'])) {
+                                $ldapBindPassword = $credentials['password'];
+                            }
+                        } catch (\Exception $e) {
+                            // If credentials manager fails, use the password as-is
+                            $this->logger->debug("Could not retrieve password from credentials manager: " . $e->getMessage());
+                        }
+                        
                         $activeConfig = [
                             'host' => $ldapHost,
                             'port' => $ldapPort,
@@ -161,6 +196,7 @@ class LdapOuService {
                             'bindDN' => $ldapBindDN,
                             'bindPassword' => $ldapBindPassword
                         ];
+                        $this->logger->debug("LDAP config loaded: {$ldapHost}:{$ldapPort}, bindDN: {$ldapBindDN}");
                         break;
                     }
                 }

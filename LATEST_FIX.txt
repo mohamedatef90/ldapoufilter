@@ -1,0 +1,24 @@
+# Latest Fix - LDAP Credentials Issue
+
+## Problem
+"Invalid credentials" error when trying to bind to LDAP
+
+## Solution
+Added code to retrieve password from Nextcloud's ICredentialsManager which properly handles encrypted passwords.
+
+## Deploy
+
+1. Copy the updated file:
+   scp lib/Service/LdapOuService.php root@192.168.2.68:/var/www/nextcloud/apps/ldapoufilter/lib/Service/
+
+2. Set permissions:
+   chown -R www-data:www-data /var/www/nextcloud/apps/ldapoufilter
+   chmod -R 755 /var/www/nextcloud/apps/ldapoufilter
+
+3. Restart Apache:
+   systemctl restart apache2
+
+4. Test and check logs:
+   tail -f /var/www/nextcloud/data/nextcloud.log | grep ldapoufilter
+
+The fix should now retrieve the LDAP password correctly from Nextcloud's credentials manager!
