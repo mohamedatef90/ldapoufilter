@@ -81,46 +81,64 @@ class LdapOuService {
                 return null;
             }
             
-            // Try to get the LDAP user's DN using the backend's getHome() method
-            // For LDAP users, the home path contains LDAP information
-            $homeDir = $user->getHome();
-            
-            // The DN can be found in the home directory path for LDAP users
-            // Format is usually like: /home/ldap/dn=cn=user,ou=org,dc=example,dc=com
-            if ($homeDir && strpos($homeDir, 'ldap') !== false) {
-                // Try to extract DN from home path
-                $parts = explode('dn=', $homeDir);
-                if (count($parts) > 1) {
-                    $dn = 'dn=' . $parts[1];
-                    $this->logger->debug("Found DN from home path for user $userId: $dn");
-                    return $dn;
-                }
-            }
-            
-            // Try alternative: get from displayName or other attributes
-            $displayName = $user->getDisplayName();
-            $this->logger->debug("User $userId home: $homeDir, displayName: $displayName");
-            
-            // Try to use reflection to access protected LDAP user properties
+            // Try reflection to access the internal LDAP user object
             try {
                 $reflection = new \ReflectionClass($user);
-                $this->logger->debug("User class: " . get_class($user));
                 
-                // Try to get all properties
-                $properties = $reflection->getProperties();
-                foreach ($properties as $property) {
-                    $property->setAccessible(true);
-                    $value = $property->getValue($user);
-                    if (is_string($value) && strpos($value, 'CN=') !== false && strpos($value, 'OU=') !== false) {
-                        $this->logger->debug("Found potential DN in property {$property->getName()}: $value");
-                        return $value;
+                // The user_ldap User class has a protected 'backend' property
+                if ($reflection->hasProperty('backend')) {
+                    $backendProp = $reflection->getProperty('backend');
+                    $backendProp->setAccessible(true);
+                    $ldapBackend = $backendProp->getValue($user);
+                    
+                    if ($ldapBackend) {
+                        // Try to get the DN from the backend's properties
+                        $backendReflection = new \ReflectionClass($ldapBackend);
+                        $this->logger->debug("LDAP Backend class: " . get_class($ldapBackend));
+                        
+                        // Try common property names where DN might be stored
+                        $possibleProperties = ['dn', 'dnString', 'dnStr', 'ldapDn', 'originalDn', 'dnAttribute'];
+                        
+                        foreach ($possibleProperties as $propName) {
+                            if ($backendReflection->hasProperty($propName)) {
+                                $prop = $backendReflection->getProperty($propName);
+                                $prop->setAccessible(true);
+                                $dn = $prop->getValue($ldapBackend);
+                                
+                                if (!empty($dn) && is_string($dn)) {
+                                    $this->logger->debug("Found DN from property $propName: $dn");
+                                    return $dn;
+                                }
+                            }
+                        }
+                        
+                        // Get all properties and look for DN
+                        $properties = $backendReflection->getProperties();
+                        $this->logger->debug("Checking " . count($properties) . " properties in LDAP backend");
+                        
+                        foreach ($properties as $property) {
+                            $property->setAccessible(true);
+                            $propName = $property->getName();
+                            $value = $property->getValue($ldapBackend);
+                            
+                            // Log property for debugging
+                            if (is_string($value) && strlen($value) < 500) {
+                                $this->logger->debug("Property $propName: $value");
+                            }
+                            
+                            // Check if the value looks like a DN
+                            if (is_string($value) && strpos($value, 'CN=') !== false && strpos($value, 'OU=') !== false) {
+                                $this->logger->debug("Found DN in property $propName: $value");
+                                return $value;
+                            }
+                        }
                     }
                 }
-            } catch (\Exception $reflectionEx) {
-                $this->logger->debug("Reflection failed: " . $reflectionEx->getMessage());
+            } catch (\ReflectionException $e) {
+                $this->logger->debug("Reflection failed: " . $e->getMessage());
             }
             
-            $this->logger->debug("Could not extract DN for user $userId from user object");
+            $this->logger->debug("Could not extract DN for user $userId");
             return null;
             
         } catch (\Exception $e) {

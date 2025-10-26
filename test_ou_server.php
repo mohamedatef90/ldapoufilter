@@ -23,23 +23,34 @@ try {
     
     echo "✓ Service created successfully\n\n";
     
-    // Test users from your environment - use UUIDs!
-    // First, get the actual UUIDs by searching
+    // Get ALL LDAP users (the actual UUIDs are what we need)
     $userManager = $container->getUserManager();
     
-    // Search for users by display name to get their UUIDs
-    $testUsers = [];
-    $displayNames = ['hunter1', 'bebo 01', 'Younis_admin'];
+    // Search for users using a wildcard to get LDAP users
+    $allUsers = $userManager->search('', 10, 0); // Empty search gets users
     
-    foreach ($displayNames as $displayName) {
-        $users = $userManager->searchDisplayName($displayName);
-        if (!empty($users)) {
-            $uuid = $users[0]->getUID();
+    echo "Found " . count($allUsers) . " users total\n";
+    
+    // Show all users
+    $testUsers = [];
+    foreach ($allUsers as $user) {
+        $uuid = $user->getUID();
+        $displayName = $user->getDisplayName();
+        $backend = $user->getBackend();
+        
+        // Only test LDAP users
+        if ($backend instanceof \OCA\User_LDAP\User_Proxy) {
             $testUsers[$displayName] = $uuid;
-            echo "Found user: $displayName -> $uuid\n";
-        } else {
-            echo "WARNING: User not found: $displayName\n";
+            echo "Found LDAP user: $displayName -> $uuid\n";
+            
+            // Also show the home directory to debug
+            echo "  Home: " . $user->getHome() . "\n";
         }
+    }
+    
+    if (empty($testUsers)) {
+        echo "\nERROR: No LDAP users found!\n";
+        echo "Make sure LDAP users are configured in Nextcloud.\n";
     }
     echo "\n";
     
@@ -60,42 +71,24 @@ try {
         }
     }
     
-    // Get UUIDs for testing
-    $hunter1_uuid = $testUsers['hunter1'] ?? null;
-    $bebo_uuid = $testUsers['bebo 01'] ?? null;
-    $younis_uuid = $testUsers['Younis_admin'] ?? null;
-    
-    echo "\n--- Testing OU Comparison ---\n";
-    if ($hunter1_uuid && $bebo_uuid) {
-        echo "Are 'hunter1' and 'bebo 01' in the same OU?\n";
-        try {
-            $sameOu = $service->areUsersInSameOu($hunter1_uuid, $bebo_uuid);
-            echo "  Result: " . ($sameOu ? 'YES' : 'NO') . "\n";
-        } catch (\Exception $e) {
-            echo "  ✗ Error: " . $e->getMessage() . "\n";
-        }
-    }
-    
-    echo "\n--- Testing User Filter ---\n";
-    if ($hunter1_uuid) {
-        $testUserUuids = array_filter([$hunter1_uuid, $bebo_uuid, $younis_uuid]);
-        echo "Current user: hunter1 ($hunter1_uuid)\n";
-        echo "Users to filter: " . count($testUserUuids) . " users\n";
+    // Test OU comparison with first two users
+    $userList = array_values($testUsers);
+    if (count($userList) >= 2) {
+        echo "\n--- Testing OU Comparison ---\n";
+        $user1 = $userList[0];
+        $user2 = $userList[1];
         
-        try {
-            $filtered = $service->filterUsersByOu($testUserUuids, $hunter1_uuid);
-            echo "  Filtered users: " . count($filtered) . " out of " . count($testUserUuids) . "\n";
-            
-            if (count($filtered) > 0) {
-                echo "  Users in same OU as hunter1:\n";
-                foreach ($filtered as $userUuid) {
-                    $userObj = $userManager->get($userUuid);
-                    $displayName = $userObj ? $userObj->getDisplayName() : $userUuid;
-                    echo "    - $displayName ($userUuid)\n";
-                }
+        $userObj1 = $userManager->get($user1);
+        $userObj2 = $userManager->get($user2);
+        
+        if ($userObj1 && $userObj2) {
+            echo "Are '{$userObj1->getDisplayName()}' and '{$userObj2->getDisplayName()}' in the same OU?\n";
+            try {
+                $sameOu = $service->areUsersInSameOu($user1, $user2);
+                echo "  Result: " . ($sameOu ? 'YES' : 'NO') . "\n";
+            } catch (\Exception $e) {
+                echo "  ✗ Error: " . $e->getMessage() . "\n";
             }
-        } catch (\Exception $e) {
-            echo "  ✗ Error: " . $e->getMessage() . "\n";
         }
     }
     
