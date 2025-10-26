@@ -62,35 +62,50 @@ class LdapOuService {
     }
     
     /**
-     * Get LDAP DN for a user by querying Nextcloud's database
-     * Nextcloud stores LDAP DN information in the user_ldap_users_mapping table
+     * Get LDAP DN for a user by using Nextcloud's LDAP user backend
+     * This retrieves the DN from the LDAP user object that Nextcloud already loaded
      */
     private function getLdapDnViaNextcloud(string $userId): ?string {
         try {
-            // Get the database connection
-            $connection = $this->serverContainer->get(\OCP\IDBConnection::class);
-            
-            // Query the user_ldap_users_mapping table for the DN
-            $query = $connection->getQueryBuilder();
-            $query->select('ldap_dn')
-                ->from('user_ldap_users_mapping')
-                ->where($query->expr()->eq('owncloud_name', $query->createNamedParameter($userId)));
-            
-            $result = $query->executeQuery();
-            $row = $result->fetch();
-            $result->closeCursor();
-            
-            if ($row && isset($row['ldap_dn']) && !empty($row['ldap_dn'])) {
-                $dn = $row['ldap_dn'];
-                $this->logger->debug("Found DN for user $userId in database: $dn");
-                return $dn;
+            // Get the user from Nextcloud's user manager
+            $user = $this->userManager->get($userId);
+            if (!$user) {
+                $this->logger->debug("User not found in Nextcloud: $userId");
+                return null;
             }
             
-            $this->logger->debug("Could not find DN for user $userId in database");
+            // Check if this is an LDAP user
+            $backend = $user->getBackend();
+            if (!$backend instanceof \OCA\User_LDAP\User_Proxy) {
+                $this->logger->debug("User $userId is not an LDAP user");
+                return null;
+            }
+            
+            // Try to get the LDAP user's DN using the backend's getHome() method
+            // For LDAP users, the home path contains LDAP information
+            $homeDir = $user->getHome();
+            
+            // The DN can be found in the home directory path for LDAP users
+            // Format is usually like: /home/ldap/dn=cn=user,ou=org,dc=example,dc=com
+            if ($homeDir && strpos($homeDir, 'ldap') !== false) {
+                // Try to extract DN from home path
+                $parts = explode('dn=', $homeDir);
+                if (count($parts) > 1) {
+                    $dn = 'dn=' . $parts[1];
+                    $this->logger->debug("Found DN from home path for user $userId: $dn");
+                    return $dn;
+                }
+            }
+            
+            // Try alternative: get from displayName or other attributes
+            $displayName = $user->getDisplayName();
+            $this->logger->debug("User $userId home: $homeDir, displayName: $displayName");
+            
+            $this->logger->debug("Could not extract DN for user $userId from user object");
             return null;
             
         } catch (\Exception $e) {
-            $this->logger->error('Error getting LDAP DN from database for user', [
+            $this->logger->error('Error getting LDAP DN from user object', [
                 'userId' => $userId,
                 'exception' => $e->getMessage()
             ]);
