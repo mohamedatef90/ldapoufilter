@@ -62,87 +62,36 @@ class LdapOuService {
     }
     
     /**
-     * Get LDAP DN for a user by using Nextcloud's LDAP user backend
-     * This retrieves the DN from the LDAP user object that Nextcloud already loaded
+     * Get LDAP DN for a user by querying Nextcloud's database
+     * The DN is stored in the ldap_user_mapping table
      */
     private function getLdapDnViaNextcloud(string $userId): ?string {
         try {
-            // Get the user from Nextcloud's user manager
-            $user = $this->userManager->get($userId);
-            if (!$user) {
-                $this->logger->debug("User not found in Nextcloud: $userId");
-                return null;
+            // Get the database connection
+            $connection = $this->serverContainer->get(\OCP\IDBConnection::class);
+            
+            // Query the ldap_user_mapping table for the DN
+            // Note: The table name is 'ldap_user_mapping' (not 'oc_user_ldap_users_mapping')
+            $query = $connection->getQueryBuilder();
+            $query->select('ldap_dn')
+                ->from('ldap_user_mapping')
+                ->where($query->expr()->eq('owncloud_name', $query->createNamedParameter($userId)));
+            
+            $result = $query->executeQuery();
+            $row = $result->fetch();
+            $result->closeCursor();
+            
+            if ($row && isset($row['ldap_dn']) && !empty($row['ldap_dn'])) {
+                $dn = $row['ldap_dn'];
+                $this->logger->debug("Found DN for user $userId in database: $dn");
+                return $dn;
             }
             
-            // Check if this is an LDAP user
-            $backend = $user->getBackend();
-            if (!$backend instanceof \OCA\User_LDAP\User_Proxy) {
-                $this->logger->debug("User $userId is not an LDAP user");
-                return null;
-            }
-            
-            // Try reflection to access the internal LDAP user object
-            try {
-                $reflection = new \ReflectionClass($user);
-                
-                // The user_ldap User class has a protected 'backend' property
-                if ($reflection->hasProperty('backend')) {
-                    $backendProp = $reflection->getProperty('backend');
-                    $backendProp->setAccessible(true);
-                    $ldapBackend = $backendProp->getValue($user);
-                    
-                    if ($ldapBackend) {
-                        // Try to get the DN from the backend's properties
-                        $backendReflection = new \ReflectionClass($ldapBackend);
-                        $this->logger->debug("LDAP Backend class: " . get_class($ldapBackend));
-                        
-                        // Try common property names where DN might be stored
-                        $possibleProperties = ['dn', 'dnString', 'dnStr', 'ldapDn', 'originalDn', 'dnAttribute'];
-                        
-                        foreach ($possibleProperties as $propName) {
-                            if ($backendReflection->hasProperty($propName)) {
-                                $prop = $backendReflection->getProperty($propName);
-                                $prop->setAccessible(true);
-                                $dn = $prop->getValue($ldapBackend);
-                                
-                                if (!empty($dn) && is_string($dn)) {
-                                    $this->logger->debug("Found DN from property $propName: $dn");
-                                    return $dn;
-                                }
-                            }
-                        }
-                        
-                        // Get all properties and look for DN
-                        $properties = $backendReflection->getProperties();
-                        $this->logger->debug("Checking " . count($properties) . " properties in LDAP backend");
-                        
-                        foreach ($properties as $property) {
-                            $property->setAccessible(true);
-                            $propName = $property->getName();
-                            $value = $property->getValue($ldapBackend);
-                            
-                            // Log property for debugging
-                            if (is_string($value) && strlen($value) < 500) {
-                                $this->logger->debug("Property $propName: $value");
-                            }
-                            
-                            // Check if the value looks like a DN
-                            if (is_string($value) && strpos($value, 'CN=') !== false && strpos($value, 'OU=') !== false) {
-                                $this->logger->debug("Found DN in property $propName: $value");
-                                return $value;
-                            }
-                        }
-                    }
-                }
-            } catch (\ReflectionException $e) {
-                $this->logger->debug("Reflection failed: " . $e->getMessage());
-            }
-            
-            $this->logger->debug("Could not extract DN for user $userId");
+            $this->logger->debug("Could not find DN for user $userId in database");
             return null;
             
         } catch (\Exception $e) {
-            $this->logger->error('Error getting LDAP DN from user object', [
+            $this->logger->error('Error getting LDAP DN from database for user', [
                 'userId' => $userId,
                 'exception' => $e->getMessage()
             ]);
