@@ -62,90 +62,35 @@ class LdapOuService {
     }
     
     /**
-     * Get LDAP DN for a user using direct LDAP connection
+     * Get LDAP DN for a user by querying Nextcloud's database
+     * Nextcloud stores LDAP DN information in the user_ldap_users_mapping table
      */
     private function getLdapDnViaNextcloud(string $userId): ?string {
         try {
-            // Get LDAP configuration from Nextcloud
-            $ldapConfig = $this->getLdapConfig();
+            // Get the database connection
+            $connection = $this->serverContainer->get(\OCP\IDBConnection::class);
             
-            if (!$ldapConfig) {
-                $this->logger->debug("LDAP not configured in Nextcloud");
-                return null;
+            // Query the user_ldap_users_mapping table for the DN
+            $query = $connection->getQueryBuilder();
+            $query->select('ldap_dn')
+                ->from('user_ldap_users_mapping')
+                ->where($query->expr()->eq('owncloud_name', $query->createNamedParameter($userId)));
+            
+            $result = $query->executeQuery();
+            $row = $result->fetch();
+            $result->closeCursor();
+            
+            if ($row && isset($row['ldap_dn']) && !empty($row['ldap_dn'])) {
+                $dn = $row['ldap_dn'];
+                $this->logger->debug("Found DN for user $userId in database: $dn");
+                return $dn;
             }
             
-            // Connect to LDAP
-            $conn = @ldap_connect($ldapConfig['host'], $ldapConfig['port']);
-            if (!$conn) {
-                $this->logger->debug("Failed to connect to LDAP");
-                return null;
-            }
-            
-            ldap_set_option($conn, LDAP_OPT_PROTOCOL_VERSION, 3);
-            ldap_set_option($conn, LDAP_OPT_REFERRALS, 0);
-            ldap_set_option($conn, LDAP_OPT_NETWORK_TIMEOUT, 10);
-            
-            // Bind with Nextcloud's LDAP credentials
-            $bindDN = $ldapConfig['bindDN'];
-            $bindPassword = $ldapConfig['bindPassword'];
-            
-            $this->logger->debug("Attempting LDAP bind", [
-                'bindDN' => $bindDN,
-                'hasPassword' => !empty($bindPassword),
-                'passwordLength' => strlen($bindPassword),
-                'host' => $ldapConfig['host'],
-                'port' => $ldapConfig['port']
-            ]);
-            
-            $bindResult = @ldap_bind($conn, $bindDN, $bindPassword);
-            if (!$bindResult) {
-                $ldapError = @ldap_error($conn);
-                $ldapErrno = @ldap_errno($conn);
-                $this->logger->error("Failed to bind to LDAP", [
-                    'error' => $ldapError,
-                    'errno' => $ldapErrno,
-                    'bindDN' => $bindDN,
-                    'host' => $ldapConfig['host'],
-                    'port' => $ldapConfig['port']
-                ]);
-                @ldap_close($conn);
-                return null;
-            }
-            
-            $this->logger->debug("Successfully bound to LDAP");
-            
-            // Search for user with multiple possible attributes
-            $escapedUserId = ldap_escape($userId, '', LDAP_ESCAPE_FILTER);
-            
-            // Try common LDAP attributes
-            $filters = [
-                "(uid=$escapedUserId)",
-                "(sAMAccountName=$escapedUserId)",
-                "(cn=$escapedUserId)",
-                "(mail=$escapedUserId)",
-                "(userPrincipalName=$escapedUserId)"
-            ];
-            
-            foreach ($filters as $filter) {
-                $search = @ldap_search($conn, $ldapConfig['base'], $filter, ['dn']);
-                
-                if ($search) {
-                    $entries = ldap_get_entries($conn, $search);
-                    if ($entries['count'] > 0 && isset($entries[0]['dn'])) {
-                        $dn = $entries[0]['dn'];
-                        @ldap_close($conn);
-                        $this->logger->debug("Found DN for user $userId: $dn");
-                        return $dn;
-                    }
-                }
-            }
-            
-            @ldap_close($conn);
-            $this->logger->debug("Could not find DN for user: $userId");
+            $this->logger->debug("Could not find DN for user $userId in database");
             return null;
             
         } catch (\Exception $e) {
-            $this->logger->error('Error getting LDAP DN for user', [
+            $this->logger->error('Error getting LDAP DN from database for user', [
                 'userId' => $userId,
                 'exception' => $e->getMessage()
             ]);
@@ -153,63 +98,7 @@ class LdapOuService {
         }
     }
     
-    /**
-     * Get LDAP configuration from Nextcloud
-     */
-    private function getLdapConfig(): ?array {
-        try {
-            // Try to get LDAP configuration from Nextcloud
-            // First, try to find which LDAP server is active
-            $activeConfig = null;
-            
-            // Loop through possible LDAP server IDs (s01, s02, etc.)
-            for ($i = 1; $i <= 10; $i++) {
-                $prefix = 's0' . $i;
-                $ldapHost = $this->config->getAppValue('user_ldap', $prefix . 'ldap_host', '');
-                
-                if (!empty($ldapHost)) {
-                    $ldapPort = $this->config->getAppValue('user_ldap', $prefix . 'ldap_port', '389');
-                    $ldapBase = $this->config->getAppValue('user_ldap', $prefix . 'ldap_base', '');
-                    $ldapBindDN = $this->config->getAppValue('user_ldap', $prefix . 'ldap_dn', '');
-                    $ldapBindPassword = $this->config->getAppValue('user_ldap', $prefix . 'ldap_agent_password', '');
-                    
-                    // Check if this is the active configuration
-                    $isActive = $this->config->getAppValue('user_ldap', $prefix . 'ldap_configuration_active', '0');
-                    
-                    if ($isActive === '1' && !empty($ldapBindDN) && !empty($ldapBindPassword)) {
-                        // Try to get the password from credentials manager
-                        try {
-                            $credentialsManager = $this->serverContainer->get(\OCP\Security\ICredentialsManager::class);
-                            $credentials = $credentialsManager->retrieve('user_ldap', $prefix . 'ldap_agent_password');
-                            if ($credentials && isset($credentials['password'])) {
-                                $ldapBindPassword = $credentials['password'];
-                            }
-                        } catch (\Exception $e) {
-                            // If credentials manager fails, use the password as-is
-                            $this->logger->debug("Could not retrieve password from credentials manager: " . $e->getMessage());
-                        }
-                        
-                        $activeConfig = [
-                            'host' => $ldapHost,
-                            'port' => $ldapPort,
-                            'base' => $ldapBase,
-                            'bindDN' => $ldapBindDN,
-                            'bindPassword' => $ldapBindPassword
-                        ];
-                        $this->logger->debug("LDAP config loaded: {$ldapHost}:{$ldapPort}, bindDN: {$ldapBindDN}");
-                        break;
-                    }
-                }
-            }
-            
-            return $activeConfig;
-            
-        } catch (\Exception $e) {
-            $this->logger->error('Error getting LDAP config: ' . $e->getMessage());
-            return null;
-        }
-    }
-    
+
 /**
      * Extract OU from DN string
      * For nested OUs, returns the MOST SPECIFIC (immediate parent) OU
