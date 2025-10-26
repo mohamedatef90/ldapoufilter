@@ -101,6 +101,25 @@ class LdapOuService {
             $displayName = $user->getDisplayName();
             $this->logger->debug("User $userId home: $homeDir, displayName: $displayName");
             
+            // Try to use reflection to access protected LDAP user properties
+            try {
+                $reflection = new \ReflectionClass($user);
+                $this->logger->debug("User class: " . get_class($user));
+                
+                // Try to get all properties
+                $properties = $reflection->getProperties();
+                foreach ($properties as $property) {
+                    $property->setAccessible(true);
+                    $value = $property->getValue($user);
+                    if (is_string($value) && strpos($value, 'CN=') !== false && strpos($value, 'OU=') !== false) {
+                        $this->logger->debug("Found potential DN in property {$property->getName()}: $value");
+                        return $value;
+                    }
+                }
+            } catch (\Exception $reflectionEx) {
+                $this->logger->debug("Reflection failed: " . $reflectionEx->getMessage());
+            }
+            
             $this->logger->debug("Could not extract DN for user $userId from user object");
             return null;
             

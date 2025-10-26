@@ -32,11 +32,15 @@ try {
         echo "  Getting OU...\n";
         
         try {
+            // Check logs to see what's happening
+            echo "  Checking logs for details...\n";
+            
             $ou = $service->getUserOu($user);
             if ($ou) {
                 echo "  ✓ OU found: $ou\n";
             } else {
                 echo "  ✗ No OU found\n";
+                echo "  (Check logs above for debug info)\n";
             }
         } catch (\Exception $e) {
             echo "  ✗ Error: " . $e->getMessage() . "\n";
