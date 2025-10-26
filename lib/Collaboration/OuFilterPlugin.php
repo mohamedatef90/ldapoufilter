@@ -139,18 +139,18 @@ class OuFilterPlugin implements ISearchPlugin {
             // This prevents returning empty results (which causes 500 errors)
             if ($filteredCount > 0 && $filteredCount < $originalCount) {
                 // Use unsetResult and addResultSet to replace the results
-                $searchResult->unsetResult('users');
-                $searchResult->addResultSet('users', $filteredResults, []);
+                $searchResult->unsetResult(SearchResultType::User);
+                $searchResult->addResultSet(SearchResultType::User, $filteredResults, []);
                 $this->logger->info("==> Filtered results: $originalCount -> $filteredCount users", ['app' => 'ldapoufilter']);
             } elseif ($filteredCount === 0) {
                 // No users in same OU found - return empty results but don't throw error
-                $searchResult->unsetResult('users');
-                $searchResult->addResultSet('users', [], []);
+                $searchResult->unsetResult(SearchResultType::User);
+                $searchResult->addResultSet(SearchResultType::User, [], []);
                 $this->logger->info("==> No users in same OU found (filtered out all $originalCount users)", ['app' => 'ldapoufilter']);
             } else {
-                                 // All users already in same OU - no filtering needed
-                 $this->logger->info("==> All $originalCount users are in same OU (no filtering needed)", ['app' => 'ldapoufilter']);
-             }
+                // All users already in same OU - no filtering needed
+                $this->logger->info("==> All $originalCount users are in same OU (no filtering needed)", ['app' => 'ldapoufilter']);
+            }
             
             return true;
 
