@@ -108,7 +108,7 @@ class OuFilterPlugin implements ISearchPlugin {
             $errorsDuringFiltering = 0;
             
             // Function to check and filter a single result
-            $checkAndAdd = function($result, &$targetArray, &$count) use ($currentUserOu, $currentUserId) {
+            $checkAndAdd = function($result, &$targetArray, &$count) use ($currentUserOu, $currentUserId, &$errorsDuringFiltering) {
                 $userId = null;
                 if (is_array($result)) {
                     $userId = $result['value']['shareWith'] ?? 
