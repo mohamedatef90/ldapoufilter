@@ -76,29 +76,39 @@ class OuFilterPlugin implements ISearchPlugin {
             $searchArray = $searchResult->asArray();
             $usersData = $searchArray['users'] ?? [];
             
-            // Handle different array structures
+            // Handle different array structures - get both 'results' and 'exact' arrays
             $results = [];
-            if (is_array($usersData) && isset($usersData['results'])) {
-                $results = $usersData['results'];
-            } elseif (is_array($usersData)) {
-                $results = $usersData;
+            $exactResults = [];
+            
+            if (is_array($usersData)) {
+                if (isset($usersData['results'])) {
+                    $results = $usersData['results'];
+                } else {
+                    $results = $usersData;
+                }
+                
+                // Also get the exact matches array
+                if (isset($usersData['exact'])) {
+                    $exactResults = $usersData['exact'];
+                }
             }
 
-            if (empty($results)) {
+            if (empty($results) && empty($exactResults)) {
                 $this->logger->info("No results to filter", ['app' => 'ldapoufilter']);
                 return false;
             }
 
-            $originalCount = count($results);
-            $this->logger->info("Filtering $originalCount results", ['app' => 'ldapoufilter']);
+            $originalCount = count($results) + count($exactResults);
+            $this->logger->info("Filtering $originalCount results (results: " . count($results) . ", exact: " . count($exactResults) . ")", ['app' => 'ldapoufilter']);
 
-            // Build filtered array - only include users in same OU
+            // Build filtered arrays - only include users in same OU
             $filteredResults = [];
+            $filteredExact = [];
             $filteredCount = 0;
             $errorsDuringFiltering = 0;
             
-            foreach ($results as $result) {
-                // Try multiple ways to get the user ID
+            // Function to check and filter a single result
+            $checkAndAdd = function($result, &$targetArray, &$count) use ($currentUserOu, $currentUserId) {
                 $userId = null;
                 if (is_array($result)) {
                     $userId = $result['value']['shareWith'] ?? 
@@ -109,8 +119,8 @@ class OuFilterPlugin implements ISearchPlugin {
                 }
                 
                 if (!$userId) {
-                    $this->logger->debug("Skipping result without userId", ['app' => 'ldapoufilter', 'result' => json_encode($result)]);
-                    continue;
+                    $this->logger->debug("Skipping result without userId", ['app' => 'ldapoufilter']);
+                    return;
                 }
 
                 $this->logger->debug("Checking user: $userId", ['app' => 'ldapoufilter']);
@@ -122,8 +132,8 @@ class OuFilterPlugin implements ISearchPlugin {
 
                     if ($userOu && $userOu === $currentUserOu) {
                         // Same OU - keep in filtered results
-                        $filteredResults[] = $result;
-                        $filteredCount++;
+                        $targetArray[] = $result;
+                        $count++;
                         $this->logger->debug("✓ User $userId kept (same OU: $userOu)", ['app' => 'ldapoufilter']);
                     } else {
                         $this->logger->debug("✗ User $userId filtered out (current OU: $currentUserOu, user OU: " . ($userOu ?: 'none') . ")", ['app' => 'ldapoufilter']);
@@ -131,17 +141,26 @@ class OuFilterPlugin implements ISearchPlugin {
                 } catch (\Exception $e) {
                     $errorsDuringFiltering++;
                     $this->logger->warning("Error checking OU for user $userId: " . $e->getMessage(), ['app' => 'ldapoufilter']);
-                    // Don't add this user to results
                 }
+            };
+            
+            // Filter the regular results
+            foreach ($results as $result) {
+                $checkAndAdd($result, $filteredResults, $filteredCount);
+            }
+            
+            // Filter the exact matches
+            foreach ($exactResults as $exactResult) {
+                $checkAndAdd($exactResult, $filteredExact, $filteredCount);
             }
 
             // Only update if we found at least one matching user in the same OU
             // This prevents returning empty results (which causes 500 errors)
             if ($filteredCount > 0 && $filteredCount < $originalCount) {
-                // Use unsetResult and addResultSet to replace the results
+                // Use unsetResult and addResultSet to replace the results (both regular and exact)
                 $searchResult->unsetResult(SearchResultType::USER);
-                $searchResult->addResultSet(SearchResultType::USER, $filteredResults, []);
-                $this->logger->info("==> Filtered results: $originalCount -> $filteredCount users", ['app' => 'ldapoufilter']);
+                $searchResult->addResultSet(SearchResultType::USER, $filteredResults, $filteredExact);
+                $this->logger->info("==> Filtered results: $originalCount -> $filteredCount users (regular: " . count($filteredResults) . ", exact: " . count($filteredExact) . ")", ['app' => 'ldapoufilter']);
             } elseif ($filteredCount === 0) {
                 // No users in same OU found - return empty results but don't throw error
                 $searchResult->unsetResult(SearchResultType::USER);
