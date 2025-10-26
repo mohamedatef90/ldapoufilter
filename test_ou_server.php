@@ -23,34 +23,43 @@ try {
     
     echo "✓ Service created successfully\n\n";
     
-    // Get ALL LDAP users (the actual UUIDs are what we need)
+    // Get ALL users (the actual UUIDs are what we need)
     $userManager = $container->getUserManager();
     
-    // Search for users using a wildcard to get LDAP users
-    $allUsers = $userManager->search('', 10, 0); // Empty search gets users
+    // Search for users using a wildcard to get all users
+    $allUsers = $userManager->search('', 100, 0); // Get up to 100 users
     
-    echo "Found " . count($allUsers) . " users total\n";
+    echo "Found " . count($allUsers) . " users total\n\n";
     
-    // Show all users
+    // Show all users with their backends
     $testUsers = [];
+    echo "--- All Users Found ---\n";
     foreach ($allUsers as $user) {
         $uuid = $user->getUID();
         $displayName = $user->getDisplayName();
         $backend = $user->getBackend();
+        $backendClass = get_class($backend);
         
-        // Only test LDAP users
+        echo "User: $displayName -> $uuid\n";
+        echo "  Backend: $backendClass\n";
+        echo "  Home: " . $user->getHome() . "\n";
+        
+        // Check if this is an LDAP user
         if ($backend instanceof \OCA\User_LDAP\User_Proxy) {
             $testUsers[$displayName] = $uuid;
-            echo "Found LDAP user: $displayName -> $uuid\n";
-            
-            // Also show the home directory to debug
-            echo "  Home: " . $user->getHome() . "\n";
+            echo "  ✓ LDAP User\n";
+        } else {
+            echo "  ✗ Not an LDAP user (class: $backendClass)\n";
         }
+        echo "\n";
     }
     
     if (empty($testUsers)) {
-        echo "\nERROR: No LDAP users found!\n";
-        echo "Make sure LDAP users are configured in Nextcloud.\n";
+        echo "\nWARNING: No LDAP users found!\n";
+        echo "Please make sure:\n";
+        echo "1. LDAP is configured in Nextcloud (Settings > Administration > LDAP/AD)\n";
+        echo "2. Users have been synced from LDAP\n";
+        echo "3. The user_ldap app is enabled\n";
     }
     echo "\n";
     
