@@ -133,31 +133,38 @@ class LdapOuService {
             return '';
         }
         
-        // STRATEGY: Find the most specific OU (not "Mail")
-        // We'll use the LAST OU that is NOT "Mail"
+        // STRATEGY: Find the most specific OU
+        // Filter out generic/parent OU names that are commonly used as containers
+        // This makes the app work with ANY AD structure without hardcoding OU names
         $selectedOu = '';
         
-        // Filter out "Mail" OU and use the most specific one
-        $specificOus = array_filter($ouParts, function($ou) {
+        // List of generic OU names to ignore (these are common parent/container names)
+        $genericOus = [
+            'mail',           // Common email container
+            'users',          // Generic user container
+            'departments',    // Generic department container
+            'ou',             // Generic OU container
+            'organization',   // Generic organization container
+            'organizational', // Generic organizational unit
+            'containers',     // Generic container
+            'computers',      // Generic computer container
+            'groups',         // Generic group container
+        ];
+        
+        // Filter out generic OUs to get the specific ones
+        $specificOus = array_filter($ouParts, function($ou) use ($genericOus) {
             $ouValue = strtolower(trim(substr($ou, 3))); // Remove "OU=" prefix
-            return $ouValue !== 'mail';
+            return !in_array($ouValue, $genericOus);
         });
         
         if (!empty($specificOus)) {
-            // Use the first specific OU (closest to the user)
+            // Use the first specific OU (closest to the user, most specific)
             $selectedOu = reset($specificOus);
-            $this->logger->info("Selected specific OU (filtered out 'Mail'): $selectedOu", ['app' => 'ldapoufilter']);
+            $this->logger->info("Selected specific OU (filtered out generic OUs): $selectedOu", ['app' => 'ldapoufilter']);
         } else {
-            // Fallback: If we can't filter out Mail, try using the second OU if available
-            if (count($ouParts) > 1) {
-                // Try second OU (might be the specific one)
-                $selectedOu = $ouParts[1];
-                $this->logger->info("Selected second OU as fallback: $selectedOu", ['app' => 'ldapoufilter']);
-            } else {
-                // Last resort: use first OU
-                $selectedOu = $ouParts[0];
-                $this->logger->info("Selected first OU as last resort: $selectedOu", ['app' => 'ldapoufilter']);
-            }
+            // Fallback: If ALL OUs are generic, use the closest one to the user
+            $selectedOu = reset($ouParts);
+            $this->logger->info("All OUs are generic, using first OU as fallback: $selectedOu", ['app' => 'ldapoufilter']);
         }
         
         $this->logger->info("=== FINAL SELECTED OU: $selectedOu ===", ['app' => 'ldapoufilter']);
