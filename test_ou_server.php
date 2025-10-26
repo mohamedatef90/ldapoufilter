@@ -23,11 +23,51 @@ try {
     
     echo "✓ Service created successfully\n\n";
     
-    // Get ALL users (the actual UUIDs are what we need)
-    $userManager = $container->getUserManager();
+    // Check LDAP app status
+    $appManager = $container->get(\OCP\App\IAppManager::class);
+    $ldapEnabled = $appManager->isEnabledForUser('user_ldap');
+    echo "LDAP app enabled: " . ($ldapEnabled ? 'YES' : 'NO') . "\n\n";
     
-    // Search for users using a wildcard to get all users
-    $allUsers = $userManager->search('', 100, 0); // Get up to 100 users
+    // Get ALL users - fetch all backends
+    $userManager = $container->getUserManager();
+    $backends = $userManager->getBackends();
+    echo "Found " . count($backends) . " user backends:\n";
+    foreach ($backends as $backend) {
+        echo "  - " . get_class($backend) . "\n";
+    }
+    echo "\n";
+    
+    // Try to get users from LDAP backend directly
+    echo "Attempting to fetch users from LDAP backend...\n";
+    $allUsers = [];
+    foreach ($backends as $backend) {
+        if ($backend instanceof \OCA\User_LDAP\User_Proxy || $backend instanceof \OCA\User_LDAP\Group_Proxy) {
+            echo "Found LDAP backend: " . get_class($backend) . "\n";
+            try {
+                // Try to get users from the backend
+                if (method_exists($backend, 'users')) {
+                    $ldapUsers = $backend->users('', 100, 0);
+                    echo "LDAP backend returned " . count($ldapUsers) . " users\n";
+                    foreach ($ldapUsers as $uid) {
+                        $user = $userManager->get($uid);
+                        if ($user) {
+                            $allUsers[] = $user;
+                        }
+                    }
+                }
+            } catch (\Exception $e) {
+                echo "Error getting users from LDAP: " . $e->getMessage() . "\n";
+            }
+        }
+    }
+    
+    // Fallback: Try regular search
+    if (empty($allUsers)) {
+        echo "Trying regular search method...\n";
+        $allUsers = $userManager->search('', 100, 0);
+    }
+    
+    echo "Total users found: " . count($allUsers) . "\n\n";
     
     echo "Found " . count($allUsers) . " users total\n\n";
     
@@ -55,11 +95,46 @@ try {
     }
     
     if (empty($testUsers)) {
-        echo "\nWARNING: No LDAP users found!\n";
-        echo "Please make sure:\n";
-        echo "1. LDAP is configured in Nextcloud (Settings > Administration > LDAP/AD)\n";
-        echo "2. Users have been synced from LDAP\n";
-        echo "3. The user_ldap app is enabled\n";
+        echo "\nWARNING: No LDAP users found via search!\n";
+        echo "This might be a backend registration issue. Testing direct DN extraction...\n\n";
+        
+        // Test specific known LDAP users from the occ user:list output
+        // Even if they're not found via search, we can still try to get their DN
+        $knownLdapUsers = [
+            'EE52A1C2-9BA9-45C4-B5B2-3AD30E2BB96B' => 'hunter1',
+            '8162AF93-5C6E-4DA9-84EC-C3BF7BFFA736' => 'bebo 01',
+            '2FC5042C-DA3B-4AB3-A22B-79BE6CBF534C' => 'Younis',
+        ];
+        
+        echo "Testing direct OU extraction for known users...\n";
+        foreach ($knownLdapUsers as $uuid => $displayName) {
+            echo "\nUser: $displayName ($uuid)\n";
+            
+            // First check if the user can be found by userManager
+            $user = $userManager->get($uuid);
+            if ($user) {
+                echo "  ✓ User found\n";
+                echo "  Backend: " . get_class($user->getBackend()) . "\n";
+                echo "  Display Name: " . $user->getDisplayName() . "\n";
+                
+                // Now try to extract OU
+                echo "  Attempting to extract OU...\n";
+                try {
+                    $ou = $service->getUserOu($uuid);
+                    if ($ou) {
+                        echo "  ✓ OU found: $ou\n";
+                        $testUsers[$displayName] = $uuid;
+                    } else {
+                        echo "  ✗ No OU found\n";
+                    }
+                } catch (\Exception $e) {
+                    echo "  ✗ Error extracting OU: " . $e->getMessage() . "\n";
+                }
+            } else {
+                echo "  ✗ User not found in userManager\n";
+                echo "  This user may not exist in the current session\n";
+            }
+        }
     }
     echo "\n";
     
