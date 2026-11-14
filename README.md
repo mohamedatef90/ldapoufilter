@@ -1,199 +1,65 @@
 # LDAP OU Filter for Nextcloud
 
-## 🎯 What This Does
+A Nextcloud app that filters user search results (sharing dialogs and mentions) so a user only sees other users from the same LDAP / Active Directory organizational unit (OU).
 
-Automatically filters Nextcloud user search results to show **only users from the same Organizational Unit (OU)** in LDAP/Active Directory.
+For example, a user in the `sales` OU only sees and can share with other users in `sales`, not users from other OUs.
 
-**Example**: Users in `cyberfirst` OU will only see and be able to share with other `cyberfirst` users, not users from `bebo` or other OUs.
+## How it works
 
----
+1. A user searches for people in a share dialog (or another place that uses the collaborators search).
+2. `OuFilterPlugin` (`lib/Collaboration/OuFilterPlugin.php`) intercepts the results.
+3. `LdapOuService` (`lib/Service/LdapOuService.php`) reads each user's LDAP DN from the `ldap_user_mapping` table that Nextcloud's LDAP integration maintains, and extracts the `OU=` parts of the DN. Results are cached in memory for the request.
+4. Users whose OU differs from the current user's are removed from the results.
 
-## ⚡ Quick Start (3 Steps)
+If the current user is not signed in or has no OU, the plugin leaves the results unchanged. `UserSearchListener` and `TalkHooks` also hook into search and Talk events (`lib/Listener/`, `lib/Hooks/`). The app registers no routes.
 
-```bash
-# 1. Upload to server
-scp -r ldapoufilter root@YOUR_SERVER:/var/www/nextcloud/apps/
+## Requirements
 
-# 2. Set permissions and enable
-ssh root@YOUR_SERVER "chown -R www-data:www-data /var/www/nextcloud/apps/ldapoufilter && sudo -u www-data php /var/www/nextcloud/occ app:enable ldapoufilter"
+- Nextcloud 31 or 32 (`appinfo/info.xml`)
+- PHP 8.1 or later (`composer.json`)
+- Nextcloud's LDAP user integration configured, with LDAP users already synced
 
-# 3. Verify
-ssh root@YOUR_SERVER "tail -20 /var/www/nextcloud/data/nextcloud.log | grep ldapoufilter"
-```
+## Installation
 
-Expected output:
-```
-LDAP OU Filter app booted successfully
-✓ OU Filter Plugin registered with Collaborators Manager
-```
-
-**Done!** The app is now filtering users by OU.
-
----
-
-## 📚 Documentation
-
-| Document | Purpose | Read Time |
-|----------|---------|-----------|
-| **[START_HERE.md](START_HERE.md)** | Overview & navigation | 2 min |
-| **[QUICK_START.md](QUICK_START.md)** | Fast installation | 5 min |
-| **[INSTALLATION_GUIDE.md](INSTALLATION_GUIDE.md)** | Complete setup | 15 min |
-| **[DEPLOYMENT_SUMMARY.md](DEPLOYMENT_SUMMARY.md)** | Technical details | 30 min |
-| **[README_COMPLETE.md](README_COMPLETE.md)** | Full reference | 60 min |
-| **[DELIVERY_PACKAGE.md](DELIVERY_PACKAGE.md)** | What's included | 10 min |
-
-**Start with**: [START_HERE.md](START_HERE.md)
-
----
-
-## ✅ Features
-
-- ✅ **Automatic**: No configuration needed
-- ✅ **Transparent**: Works in background
-- ✅ **Fast**: Database-backed with caching
-- ✅ **Secure**: OU-based organizational boundaries
-- ✅ **Error-Resilient**: Handles edge cases gracefully
-- ✅ **Universal**: Works in Files, Talk, and all sharing features
-
----
-
-## 🔧 How It Works
-
-```
-User searches for "john" in share dialog
-         ↓
-Plugin intercepts search results
-         ↓
-Queries database for user OUs
-         ↓
-Filters: same OU = keep, different OU = remove
-         ↓
-Returns filtered list to UI
-```
-
-**Database**: Uses `ldap_user_mapping` table (created by Nextcloud LDAP app)  
-**Query**: Gets LDAP DN, extracts OU from DN  
-**Filter**: Compares current user's OU with searched users' OUs
-
----
-
-## 📋 Requirements
-
-- Nextcloud 31.0 or later
-- PHP 8.0 or later  
-- LDAP/Active Directory configured
-- PostgreSQL or MySQL/MariaDB
-- LDAP users already synced to Nextcloud
-
----
-
-## 🧪 Testing
+Copy the app into Nextcloud's `apps` folder and enable it. With the included Makefile (adjust `nextcloud_dir` at the top if your Nextcloud is not in `/var/www/nextcloud`):
 
 ```bash
-# Quick test
+make install     # copy to apps/, set ownership, run occ app:enable
+make logs        # follow the Nextcloud log filtered to this app
+make uninstall   # disable and remove the app
+```
+
+Or manually:
+
+```bash
+cp -r ldapoufilter /var/www/nextcloud/apps/
+chown -R www-data:www-data /var/www/nextcloud/apps/ldapoufilter
+sudo -u www-data php /var/www/nextcloud/occ app:enable ldapoufilter
+```
+
+Other Makefile targets: `reinstall`, `enable`, `disable`, `test-ldap`, `help`.
+
+## Verifying
+
+Check the Nextcloud log for the app's messages, then search for users in a share dialog and confirm only users from your OU appear. `test_ou_server.php` can be run from the Nextcloud server for a direct check:
+
+```bash
 sudo -u www-data php /var/www/nextcloud/apps/ldapoufilter/test_ou_server.php
-
-# UI test
-# Login → Files → Share → Search for users
-# You should only see users from your OU
 ```
 
----
-
-## 🐛 Troubleshooting
-
-### All users still visible?
-```bash
-# Check app is enabled
-sudo -u www-data php /var/www/nextcloud/occ app:list | grep ldapoufilter
-
-# Check plugin activation
-tail -100 /var/www/nextcloud/data/nextcloud.log | grep "OU Filter Plugin"
-```
-
-### 500 errors?
-```bash
-# Check logs
-tail -100 /var/www/nextcloud/data/nextcloud.log | grep ldapoufilter
-```
-
-**For detailed troubleshooting**: See [INSTALLATION_GUIDE.md](INSTALLATION_GUIDE.md) - Troubleshooting section
-
----
-
-## 📁 Project Structure
+## Project structure
 
 ```
-ldapoufilter/
-├── lib/
-│   ├── AppInfo/Application.php         # Bootstrap
-│   ├── Collaboration/OuFilterPlugin.php  # Main filter ⭐
-│   └── Service/LdapOuService.php       # OU retrieval ⭐
-├── appinfo/
-│   ├── info.xml
-│   └── routes.php
-└── Documentation (6 files)
+appinfo/info.xml, routes.php          App metadata and (empty) routes
+lib/AppInfo/Application.php           Bootstrap and registration
+lib/Collaboration/OuFilterPlugin.php  Collaborators search plugin that filters results
+lib/Service/LdapOuService.php         DN lookup and OU extraction
+lib/Listener/UserSearchListener.php   Search result listener
+lib/Hooks/TalkHooks.php               Talk event hook
+Makefile, *.sh, test_*.php            Install, deploy, diagnostic, and test helpers
+START_HERE.md, INSTALLATION_GUIDE.md, ...   Additional guides
 ```
 
----
+## License
 
-## 🎯 Key Files
-
-**lib/Collaboration/OuFilterPlugin.php**
-- Intercepts search results
-- Filters users by OU match
-- Returns filtered list to UI
-
-**lib/Service/LdapOuService.php**
-- Queries `ldap_user_mapping` table
-- Extracts OU from LDAP DN
-- Caches results for performance
-
-**lib/AppInfo/Application.php**
-- Registers services
-- Hooks plugin into Nextcloud's Collaborators Manager
-
----
-
-## 📝 Installation Checklist
-
-- [ ] Upload files to `/var/www/nextcloud/apps/ldapoufilter`
-- [ ] Set permissions (`chown -R www-data:www-data`)
-- [ ] Enable app (`occ app:enable ldapoufilter`)
-- [ ] Verify in logs
-- [ ] Test in UI
-
----
-
-## 🚀 What Was Fixed (v1.1)
-
-- ✅ Fixed database table name (`ldap_user_mapping`)
-- ✅ Proper error handling (no 500 errors)
-- ✅ Works with Talk autocomplete
-- ✅ Handles empty search results gracefully
-- ✅ Improved OU extraction logic
-
----
-
-## 📞 Support
-
-1. **Quick issues**: [QUICK_START.md](QUICK_START.md)
-2. **Detailed help**: [INSTALLATION_GUIDE.md](INSTALLATION_GUIDE.md)
-3. **Technical details**: [DEPLOYMENT_SUMMARY.md](DEPLOYMENT_SUMMARY.md)
-
----
-
-## 📜 License
-
-AGPL-3.0
-
----
-
-**Version**: 1.1  
-**Status**: ✅ Production Ready  
-**Tested**: Nextcloud 31.0+  
-**Last Updated**: October 2025
-
----
-
-**Need help?** Start with [START_HERE.md](START_HERE.md)
+AGPL-3.0, as declared in `composer.json` and `appinfo/info.xml`. The repository has no separate LICENSE file.
